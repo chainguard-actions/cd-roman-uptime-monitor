@@ -1,0 +1,63 @@
+name: Test multiple sites monitoring
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up local git remote so push succeeds
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git init --bare /tmp/remote-repo.git
+          git remote remove origin 2>/dev/null || true
+          git remote add origin /tmp/remote-repo.git
+          git push --set-upstream origin HEAD:act-harness
+
+      - id: action
+        uses: .
+        with:
+          sites: |
+            https://example.com
+            https://httpbin.org/status/200
+          create-issue: "false"
+          log-file: "test-multi-uptime.log"
+          max-concurrent: "2"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert total-sites is 2
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "2" ]; then
+            echo "FAIL: expected total-sites to be '2', got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed-sites output is set
+        env:
+          FAILED: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $FAILED"
+          if [ -z "$FAILED" ]; then
+            echo "FAIL: expected failed-sites output to be set"
+            exit 1
+          fi
+          echo "PASS: failed-sites=$FAILED"
+
+      - name: Assert log file was created
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "Checking for log file at: $LOG_PATH"
+          if [ ! -f "$LOG_PATH" ]; then
+            echo "FAIL: log file not found at $LOG_PATH"
+            exit 1
+          fi
+          echo "PASS: log file exists"
+          cat "$LOG_PATH"

@@ -1,0 +1,74 @@
+name: Test custom configuration options
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up local git remote so push succeeds
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git init --bare /tmp/remote-repo.git
+          git remote remove origin 2>/dev/null || true
+          git remote add origin /tmp/remote-repo.git
+          git push --set-upstream origin HEAD:act-harness
+
+      - id: action
+        uses: .
+        with:
+          sites: "https://example.com"
+          timezone: "America/New_York"
+          log-file: "custom-config-uptime.log"
+          commit-message: "Custom commit message"
+          timeout: "10"
+          success-codes: "200,201,202,204,301,302"
+          max-concurrent: "3"
+          create-issue: "false"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert total-sites output
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "1" ]; then
+            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed-sites output is set
+        env:
+          FAILED: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $FAILED"
+          if [ -z "$FAILED" ]; then
+            echo "FAIL: expected failed-sites output to be set"
+            exit 1
+          fi
+          echo "PASS: failed-sites=$FAILED"
+
+      - name: Assert log file was created with custom path
+        run: |
+          echo "Checking for log file at: custom-config-uptime.log"
+          if [ ! -f "custom-config-uptime.log" ]; then
+            echo "FAIL: log file not found at custom-config-uptime.log"
+            exit 1
+          fi
+          echo "PASS: log file exists"
+          cat "custom-config-uptime.log"
+
+      - name: Assert log-file-path output matches configured path
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "log-file-path: $LOG_PATH"
+          if [ -z "$LOG_PATH" ]; then
+            echo "FAIL: expected log-file-path output to be set"
+            exit 1
+          fi
+          echo "PASS: log-file-path=$LOG_PATH"
