@@ -1,0 +1,78 @@
+name: Test basic uptime monitoring
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up git config and fake remote
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git config push.default current
+          # Create a bare repo to act as the remote
+          git init --bare /tmp/fake-remote.git
+          git remote remove origin 2>/dev/null || true
+          git remote add origin /tmp/fake-remote.git
+          # Push current branch to the fake remote and set upstream
+          git push -u origin HEAD:act-harness
+      - name: Start local HTTP server
+        run: |
+          mkdir -p /tmp/www
+          echo "OK" > /tmp/www/index.html
+          cd /tmp/www && python3 -m http.server 8765 &
+          # Wait for server to be ready
+          for i in $(seq 1 10); do
+            curl -sf http://localhost:8765/ && break
+            sleep 1
+          done
+      - id: action
+        uses: .
+        with:
+          sites: "http://localhost:8765/"
+          create-issue: "false"
+          timeout: "10"
+        env:
+          GITHUB_TOKEN: dummy-token
+      - name: Assert total-sites output
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "1" ]; then
+            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert failed-sites output is set
+        env:
+          FAILED: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $FAILED"
+          if [ -z "$FAILED" ]; then
+            echo "FAIL: expected failed-sites to be set"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert log-file-path output is set
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "log-file-path: $LOG_PATH"
+          if [ -z "$LOG_PATH" ]; then
+            echo "FAIL: expected log-file-path to be set"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert log file exists
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "Checking log file at: $LOG_PATH"
+          if [ ! -f "$LOG_PATH" ]; then
+            echo "FAIL: log file not found at '$LOG_PATH'"
+            exit 1
+          fi
+          echo "PASS: log file exists"
+          cat "$LOG_PATH"

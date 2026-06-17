@@ -1,0 +1,69 @@
+name: Test custom configuration
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up git config and fake remote
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git config push.default current
+          # Create a bare repo to act as the remote
+          git init --bare /tmp/fake-remote.git
+          git remote remove origin 2>/dev/null || true
+          git remote add origin /tmp/fake-remote.git
+          # Push current branch to the fake remote and set upstream
+          git push -u origin HEAD:act-harness
+      - name: Start local HTTP server
+        run: |
+          mkdir -p /tmp/www
+          echo "OK" > /tmp/www/index.html
+          cd /tmp/www && python3 -m http.server 8765 &
+          # Wait for server to be ready
+          for i in $(seq 1 10); do
+            curl -sf http://localhost:8765/ && break
+            sleep 1
+          done
+      - id: action
+        uses: .
+        with:
+          sites: "http://localhost:8765/"
+          create-issue: "false"
+          timeout: "10"
+          timezone: "America/New_York"
+          log-file: "custom-uptime.log"
+          success-codes: "200,201,202,204"
+          max-concurrent: "2"
+        env:
+          GITHUB_TOKEN: dummy-token
+      - name: Assert log-file-path matches custom path
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "log-file-path: $LOG_PATH"
+          if [[ "$LOG_PATH" != *"custom-uptime.log"* ]]; then
+            echo "FAIL: expected log-file-path to contain 'custom-uptime.log', got '$LOG_PATH'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert custom log file exists
+        run: |
+          if [ ! -f "custom-uptime.log" ]; then
+            echo "FAIL: custom log file 'custom-uptime.log' not found"
+            exit 1
+          fi
+          echo "PASS: custom log file exists"
+          cat "custom-uptime.log"
+      - name: Assert total-sites is 1
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "1" ]; then
+            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"

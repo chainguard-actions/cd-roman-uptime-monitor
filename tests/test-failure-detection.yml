@@ -1,0 +1,83 @@
+name: Test failure detection
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up git config and fake remote
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git config push.default current
+          # Create a bare repo to act as the remote
+          git init --bare /tmp/fake-remote.git
+          git remote remove origin 2>/dev/null || true
+          git remote add origin /tmp/fake-remote.git
+          # Push current branch to the fake remote and set upstream
+          git push -u origin HEAD:act-harness
+      - name: Start local HTTP server that returns 404
+        run: |
+          # Use Python to serve a 404 response
+          python3 -c "
+          import http.server, socketserver
+
+          class Handler(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(404)
+                  self.end_headers()
+                  self.wfile.write(b'Not Found')
+              def log_message(self, format, *args):
+                  pass
+
+          with socketserver.TCPServer(('', 8766), Handler) as httpd:
+              httpd.serve_forever()
+          " &
+          # Wait for server to be ready (use -s without -f since we expect 404)
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8766/ 2>/dev/null || true)
+            [ "$STATUS" = "404" ] && break
+            sleep 1
+          done
+          echo "Server ready"
+      - id: action
+        uses: .
+        with:
+          sites: "http://localhost:8766/"
+          create-issue: "false"
+          timeout: "10"
+          success-codes: "200,201,202,204"
+        env:
+          GITHUB_TOKEN: dummy-token
+      - name: Assert total-sites is 1
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "1" ]; then
+            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert failed-sites is 1 (404 is not in success codes)
+        env:
+          FAILED: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $FAILED"
+          if [ "$FAILED" != "1" ]; then
+            echo "FAIL: expected failed-sites to be '1', got '$FAILED'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert log file exists
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "log-file-path: $LOG_PATH"
+          if [ ! -f "$LOG_PATH" ]; then
+            echo "FAIL: log file not found at '$LOG_PATH'"
+            exit 1
+          fi
+          echo "PASS: log file exists"
+          cat "$LOG_PATH"
