@@ -1,0 +1,54 @@
+name: Test basic uptime monitoring
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local git remote for push
+        run: |
+          git init --bare /tmp/remote.git
+          # Remove existing origin if present, then add our local bare repo
+          git remote remove origin 2>/dev/null || true
+          git remote add origin /tmp/remote.git
+          # Push current HEAD and set upstream tracking so 'git push' works without args
+          git push --set-upstream origin HEAD
+      - id: action
+        uses: .
+        with:
+          sites: |
+            https://example.com
+          create-issue: "false"
+        env:
+          GITHUB_TOKEN: dummy-token
+      - name: Assert total-sites output
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "1" ]; then
+            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert log-file-path output is set
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "log-file-path: $LOG_PATH"
+          if [ -z "$LOG_PATH" ]; then
+            echo "FAIL: expected log-file-path to be non-empty"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert failed-sites output is set
+        env:
+          FAILED: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $FAILED"
+          if [ -z "$FAILED" ]; then
+            echo "FAIL: expected failed-sites to be set (got empty)"
+            exit 1
+          fi
+          echo "PASS"
