@@ -1,0 +1,62 @@
+name: Test custom configuration options
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up local git remote so action can push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git init --bare /tmp/fake-remote.git
+          git remote set-url origin /tmp/fake-remote.git
+          git push --set-upstream origin HEAD
+
+      - id: action
+        uses: .
+        with:
+          sites: |
+            https://httpbin.org/status/200
+          create-issue: "false"
+          timeout: "10"
+          log-file: "custom-uptime.log"
+          timezone: "America/New_York"
+          max-concurrent: "2"
+          success-codes: "200,201"
+
+      - name: Assert log-file-path matches custom path
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "log-file-path: $LOG_PATH"
+          if [[ "$LOG_PATH" != *"custom-uptime.log"* ]]; then
+            echo "FAIL: expected log-file-path to contain 'custom-uptime.log', got '$LOG_PATH'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert custom log file exists
+        run: |
+          if [ ! -f "custom-uptime.log" ]; then
+            echo "FAIL: custom log file 'custom-uptime.log' not found"
+            exit 1
+          fi
+          echo "Custom log file contents:"
+          cat "custom-uptime.log"
+          echo "PASS"
+
+      - name: Assert total-sites is 1
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "1" ]; then
+            echo "FAIL: expected total-sites=1, got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
