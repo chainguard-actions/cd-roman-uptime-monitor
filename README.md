@@ -10,6 +10,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 |---------|-----|-----------------|
 | v1.0.3 | [`v1.0.3`](https://github.com/chainguard-actions/cd-roman-uptime-monitor/tree/v1.0.3) | [`510b275`](https://github.com/cd-roman/uptime-monitor/commit/510b2758ba55975c3d0f91aa1aa14d53f7fbf13a) |
 | v1.0.4 | [`v1.0.4`](https://github.com/chainguard-actions/cd-roman-uptime-monitor/tree/v1.0.4) | [`92a6462`](https://github.com/cd-roman/uptime-monitor/commit/92a6462998b2f6063313e473fbaa0f93e8012b46) |
+| v1.0.5 | [`v1.0.5`](https://github.com/chainguard-actions/cd-roman-uptime-monitor/tree/v1.0.5) | [`24902bf`](https://github.com/cd-roman/uptime-monitor/commit/24902bfba4532aa61a631d5069153e63391d0bd3) |
 | v1.0.6 | [`v1.0.6`](https://github.com/chainguard-actions/cd-roman-uptime-monitor/tree/v1.0.6) | [`83e5602`](https://github.com/cd-roman/uptime-monitor/commit/83e5602bc00f0ae9d335daae9cf37f4f389e9f79) |
 | v1.0.7 | [`v1.0.7`](https://github.com/chainguard-actions/cd-roman-uptime-monitor/tree/v1.0.7) | [`ec1e070`](https://github.com/cd-roman/uptime-monitor/commit/ec1e070595797383fcec0834b693d9689df3e0b3) |
 
