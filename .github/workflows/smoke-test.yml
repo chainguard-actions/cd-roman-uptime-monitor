@@ -1,0 +1,44 @@
+name: Smoke‐Test Uptime Monitor (build‐on‐the‐fly)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to commit & push the log-file
+  issues: write     # needed to open an issue when a site is down
+
+jobs:
+  run-local:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle action code
+        run: npx ncc build src/index.js -o dist
+
+      - name: Run our action
+        uses: "./"            # action.yml → dist/index.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          sites: |
+            https://httpbin.org/status/200
+            https://httpbin.org/status/404
+            https://httpbin.org/status/500
+            https://httpbin.org/delay/5
+            https://httpbin.org/delay/10
+          timezone: "Europe/Paris"
+          timeout: "10"
+          log-file: "uptime-smoke.log"
+          commit-message: "🔍 Smoke‐test run"
+           

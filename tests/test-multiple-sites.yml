@@ -1,6 +1,7 @@
 name: Test multiple sites monitoring
 on:
   workflow_dispatch:
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -9,13 +10,19 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up local git remote so action can push
+      - name: Install fake git that no-ops push
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git init --bare /tmp/fake-remote.git
-          git remote set-url origin /tmp/fake-remote.git
-          git push --set-upstream origin HEAD
+          mkdir -p /tmp/fake-bin
+          cat > /tmp/fake-bin/git << 'EOF'
+          #!/bin/sh
+          if [ "$1" = "push" ]; then
+            echo "[fake-git] Skipping push (test mode)"
+            exit 0
+          fi
+          exec /usr/bin/git "$@"
+          EOF
+          chmod +x /tmp/fake-bin/git
+          echo "/tmp/fake-bin" >> "$GITHUB_PATH"
 
       - id: action
         uses: .
@@ -23,48 +30,48 @@ jobs:
           sites: |
             https://httpbin.org/status/200
             https://httpbin.org/status/201
-            https://httpbin.org/status/204
           create-issue: "false"
+          log-file: "tests/uptime-test-multi.log"
           timeout: "30"
-          success-codes: "200,201,202,204"
+          max-concurrent: "2"
 
-      - name: Assert total-sites is 3
+      - name: Assert total-sites output is 2
         env:
-          TOTAL: ${{ steps.action.outputs.total-sites }}
+          ACTUAL: ${{ steps.action.outputs.total-sites }}
         run: |
-          echo "total-sites: $TOTAL"
-          if [ "$TOTAL" != "3" ]; then
-            echo "FAIL: expected total-sites=3, got '$TOTAL'"
+          echo "actual total-sites: $ACTUAL"
+          if [ "$ACTUAL" != "2" ]; then
+            echo "FAIL: expected total-sites=2, got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS"
+          echo "PASS: total-sites=2"
 
-      - name: Assert failed-sites is 0
+      - name: Assert failed-sites output is 0
         env:
-          FAILED: ${{ steps.action.outputs.failed-sites }}
+          ACTUAL: ${{ steps.action.outputs.failed-sites }}
         run: |
-          echo "failed-sites: $FAILED"
-          if [ "$FAILED" != "0" ]; then
-            echo "FAIL: expected failed-sites=0, got '$FAILED'"
+          echo "actual failed-sites: $ACTUAL"
+          if [ "$ACTUAL" != "0" ]; then
+            echo "FAIL: expected failed-sites=0, got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS"
+          echo "PASS: failed-sites=0"
 
-      - name: Assert log file exists and has entries
-        env:
-          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+      - name: Assert log file contains both URLs
         run: |
-          echo "Checking log file at: $LOG_PATH"
-          if [ ! -f "$LOG_PATH" ]; then
-            echo "FAIL: log file not found at '$LOG_PATH'"
+          LOG="tests/uptime-test-multi.log"
+          if [ ! -f "$LOG" ]; then
+            echo "FAIL: log file not found at $LOG"
             exit 1
           fi
           echo "Log file contents:"
-          cat "$LOG_PATH"
-          LINE_COUNT=$(wc -l < "$LOG_PATH")
-          echo "Line count: $LINE_COUNT"
-          if [ "$LINE_COUNT" -lt 1 ]; then
-            echo "FAIL: expected log file to have at least 1 line"
+          cat "$LOG"
+          if ! grep -q "httpbin.org/status/200" "$LOG"; then
+            echo "FAIL: log file does not contain first URL"
             exit 1
           fi
-          echo "PASS"
+          if ! grep -q "httpbin.org/status/201" "$LOG"; then
+            echo "FAIL: log file does not contain second URL"
+            exit 1
+          fi
+          echo "PASS: log file contains both URLs"

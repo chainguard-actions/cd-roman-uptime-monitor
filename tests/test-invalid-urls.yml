@@ -1,0 +1,31 @@
+name: Test invalid URL input handling
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        with:
+          sites: |
+            not-a-url
+            ftp://invalid-protocol.com
+            just-text
+          create-issue: "false"
+          log-file: "tests/uptime-test-invalid.log"
+        continue-on-error: true
+
+      - name: Assert action failed due to no valid sites
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "action outcome: $OUTCOME"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected action to fail when no valid URLs provided, got '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS: action correctly failed with no valid URLs"

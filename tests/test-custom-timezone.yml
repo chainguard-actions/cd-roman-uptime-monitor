@@ -1,0 +1,72 @@
+name: Test custom timezone and log file path
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake git that no-ops push
+        run: |
+          mkdir -p /tmp/fake-bin
+          cat > /tmp/fake-bin/git << 'EOF'
+          #!/bin/sh
+          if [ "$1" = "push" ]; then
+            echo "[fake-git] Skipping push (test mode)"
+            exit 0
+          fi
+          exec /usr/bin/git "$@"
+          EOF
+          chmod +x /tmp/fake-bin/git
+          echo "/tmp/fake-bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          sites: "https://httpbin.org/status/200"
+          timezone: "America/New_York"
+          create-issue: "false"
+          log-file: "tests/uptime-test-timezone.log"
+          timeout: "30"
+
+      - name: Assert log-file-path output matches custom path
+        env:
+          ACTUAL: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "actual log-file-path: $ACTUAL"
+          if [ "$ACTUAL" != "tests/uptime-test-timezone.log" ]; then
+            echo "FAIL: expected log-file-path='tests/uptime-test-timezone.log', got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS: log-file-path matches custom path"
+
+      - name: Assert total-sites is 1
+        env:
+          ACTUAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "actual total-sites: $ACTUAL"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected total-sites=1, got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS: total-sites=1"
+
+      - name: Assert log file was created with content
+        run: |
+          LOG="tests/uptime-test-timezone.log"
+          if [ ! -f "$LOG" ]; then
+            echo "FAIL: log file not found at $LOG"
+            exit 1
+          fi
+          echo "Log file contents:"
+          cat "$LOG"
+          # The log should contain a timestamp entry
+          if ! grep -q "Status:" "$LOG"; then
+            echo "FAIL: log file does not contain status entry"
+            exit 1
+          fi
+          echo "PASS: log file created with status entries"

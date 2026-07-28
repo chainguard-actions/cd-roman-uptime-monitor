@@ -1,4 +1,4 @@
-name: Test basic usage - single site monitoring
+name: Test custom success codes
 on:
   workflow_dispatch:
 
@@ -27,12 +27,13 @@ jobs:
       - id: action
         uses: .
         with:
-          sites: "https://httpbin.org/status/200"
+          sites: "https://httpbin.org/status/404"
           create-issue: "false"
-          log-file: "tests/uptime-test-basic.log"
+          log-file: "tests/uptime-test-custom-codes.log"
+          success-codes: "200,201,202,204,404"
           timeout: "30"
 
-      - name: Assert total-sites output
+      - name: Assert total-sites output is 1
         env:
           ACTUAL: ${{ steps.action.outputs.total-sites }}
         run: |
@@ -43,39 +44,28 @@ jobs:
           fi
           echo "PASS: total-sites=1"
 
-      - name: Assert failed-sites output
+      - name: Assert failed-sites is 0 because 404 is in success-codes
         env:
           ACTUAL: ${{ steps.action.outputs.failed-sites }}
         run: |
           echo "actual failed-sites: $ACTUAL"
           if [ "$ACTUAL" != "0" ]; then
-            echo "FAIL: expected failed-sites=0, got '$ACTUAL'"
+            echo "FAIL: expected failed-sites=0 (404 is in success-codes), got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS: failed-sites=0"
+          echo "PASS: failed-sites=0 (404 treated as success)"
 
-      - name: Assert log-file-path output
-        env:
-          ACTUAL: ${{ steps.action.outputs.log-file-path }}
+      - name: Assert log file contains the URL
         run: |
-          echo "actual log-file-path: $ACTUAL"
-          if [ "$ACTUAL" != "tests/uptime-test-basic.log" ]; then
-            echo "FAIL: expected log-file-path='tests/uptime-test-basic.log', got '$ACTUAL'"
-            exit 1
-          fi
-          echo "PASS: log-file-path correct"
-
-      - name: Assert log file was created and contains results
-        run: |
-          LOG="tests/uptime-test-basic.log"
+          LOG="tests/uptime-test-custom-codes.log"
           if [ ! -f "$LOG" ]; then
             echo "FAIL: log file not found at $LOG"
             exit 1
           fi
           echo "Log file contents:"
           cat "$LOG"
-          if ! grep -q "httpbin.org" "$LOG"; then
+          if ! grep -q "httpbin.org/status/404" "$LOG"; then
             echo "FAIL: log file does not contain expected URL"
             exit 1
           fi
-          echo "PASS: log file exists and contains expected content"
+          echo "PASS: log file contains expected URL"

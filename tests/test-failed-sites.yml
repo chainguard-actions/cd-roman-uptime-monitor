@@ -1,4 +1,4 @@
-name: Test basic usage - single site monitoring
+name: Test failed sites detection
 on:
   workflow_dispatch:
 
@@ -27,12 +27,14 @@ jobs:
       - id: action
         uses: .
         with:
-          sites: "https://httpbin.org/status/200"
+          sites: "https://httpbin.org/status/500"
           create-issue: "false"
-          log-file: "tests/uptime-test-basic.log"
+          log-file: "tests/uptime-test-failed.log"
           timeout: "30"
+        # The action itself succeeds (exit 0) even when sites fail;
+        # it only sets the failed-sites output count
 
-      - name: Assert total-sites output
+      - name: Assert total-sites output is 1
         env:
           ACTUAL: ${{ steps.action.outputs.total-sites }}
         run: |
@@ -43,39 +45,32 @@ jobs:
           fi
           echo "PASS: total-sites=1"
 
-      - name: Assert failed-sites output
+      - name: Assert failed-sites output is 1
         env:
           ACTUAL: ${{ steps.action.outputs.failed-sites }}
         run: |
           echo "actual failed-sites: $ACTUAL"
-          if [ "$ACTUAL" != "0" ]; then
-            echo "FAIL: expected failed-sites=0, got '$ACTUAL'"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected failed-sites=1 (500 is not a success code), got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS: failed-sites=0"
+          echo "PASS: failed-sites=1"
 
-      - name: Assert log-file-path output
-        env:
-          ACTUAL: ${{ steps.action.outputs.log-file-path }}
+      - name: Assert log file contains the failed URL
         run: |
-          echo "actual log-file-path: $ACTUAL"
-          if [ "$ACTUAL" != "tests/uptime-test-basic.log" ]; then
-            echo "FAIL: expected log-file-path='tests/uptime-test-basic.log', got '$ACTUAL'"
-            exit 1
-          fi
-          echo "PASS: log-file-path correct"
-
-      - name: Assert log file was created and contains results
-        run: |
-          LOG="tests/uptime-test-basic.log"
+          LOG="tests/uptime-test-failed.log"
           if [ ! -f "$LOG" ]; then
             echo "FAIL: log file not found at $LOG"
             exit 1
           fi
           echo "Log file contents:"
           cat "$LOG"
-          if ! grep -q "httpbin.org" "$LOG"; then
+          if ! grep -q "httpbin.org/status/500" "$LOG"; then
             echo "FAIL: log file does not contain expected URL"
             exit 1
           fi
-          echo "PASS: log file exists and contains expected content"
+          if ! grep -q "Status: 500" "$LOG"; then
+            echo "FAIL: log file does not show status 500"
+            exit 1
+          fi
+          echo "PASS: log file records the failed site with status 500"
