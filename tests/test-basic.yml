@@ -1,0 +1,87 @@
+name: Test basic uptime monitoring
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git identity and remote for push
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+          git fetch origin
+          git branch --set-upstream-to=origin/act-harness act-harness 2>/dev/null || \
+            git branch -u origin/act-harness 2>/dev/null || true
+
+      - id: action
+        uses: .
+        with:
+          sites: |
+            https://example.com
+          log-file: tests/uptime-basic.log
+          create-issue: "false"
+          timeout: "30"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert total-sites output
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "1" ]; then
+            echo "FAIL: expected total-sites=1, got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert log-file-path output
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "log-file-path: $LOG_PATH"
+          if [ "$LOG_PATH" != "tests/uptime-basic.log" ]; then
+            echo "FAIL: expected log-file-path='tests/uptime-basic.log', got '$LOG_PATH'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed-sites output is a number
+        env:
+          FAILED: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $FAILED"
+          if ! echo "$FAILED" | grep -qE '^[0-9]+$'; then
+            echo "FAIL: expected failed-sites to be a number, got '$FAILED'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert log file was created and contains content
+        run: |
+          LOG="tests/uptime-basic.log"
+          if [ ! -f "$LOG" ]; then
+            echo "FAIL: log file '$LOG' was not created"
+            exit 1
+          fi
+          echo "Log file contents:"
+          cat "$LOG"
+          if ! grep -q "https://example.com" "$LOG"; then
+            echo "FAIL: log file does not contain 'https://example.com'"
+            exit 1
+          fi
+          echo "PASS"

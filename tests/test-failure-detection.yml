@@ -1,0 +1,64 @@
+name: Test failure detection
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up local git remote for act compatibility
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          # Create a bare repo to act as the remote
+          git init --bare /tmp/remote-repo.git
+          git remote remove origin 2>/dev/null || true
+          git remote add origin /tmp/remote-repo.git
+          # Push and set upstream tracking so bare `git push` works in the action
+          git push -u origin HEAD
+
+      - id: action
+        uses: .
+        with:
+          sites: |
+            https://httpbin.org/status/500
+          create-issue: "false"
+          log-file: "test-uptime-failure.log"
+          success-codes: "200,201,202,204"
+          timeout: "30"
+
+      - name: Assert total-sites is 1
+        env:
+          ACTUAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $ACTUAL"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected total-sites to be '1', got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed-sites is 1 (500 or network error is not a success code)
+        env:
+          ACTUAL: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $ACTUAL"
+          # Either a 500 response or a network error (status 0) counts as failure
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected failed-sites to be '1', got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert log file exists
+        env:
+          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+        run: |
+          echo "Checking log file at: $LOG_PATH"
+          if [ ! -f "$LOG_PATH" ]; then
+            echo "FAIL: log file not found at '$LOG_PATH'"
+            exit 1
+          fi
+          echo "PASS: log file exists"
+          cat "$LOG_PATH"

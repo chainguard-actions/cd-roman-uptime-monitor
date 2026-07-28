@@ -1,0 +1,82 @@
+name: Test multiple sites monitoring
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git identity and remote for push
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+          git fetch origin
+          git branch --set-upstream-to=origin/act-harness act-harness 2>/dev/null || \
+            git branch -u origin/act-harness 2>/dev/null || true
+
+      - id: action
+        uses: .
+        with:
+          sites: |
+            https://example.com
+            https://www.iana.org
+            https://www.w3.org
+          log-file: tests/uptime-multi.log
+          create-issue: "false"
+          timeout: "30"
+          max-concurrent: "3"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert total-sites is 3
+        env:
+          TOTAL: ${{ steps.action.outputs.total-sites }}
+        run: |
+          echo "total-sites: $TOTAL"
+          if [ "$TOTAL" != "3" ]; then
+            echo "FAIL: expected total-sites=3, got '$TOTAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed-sites output is a number
+        env:
+          FAILED: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "failed-sites: $FAILED"
+          if ! echo "$FAILED" | grep -qE '^[0-9]+$'; then
+            echo "FAIL: expected failed-sites to be a number, got '$FAILED'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert log file was created with entries for all sites
+        run: |
+          LOG="tests/uptime-multi.log"
+          if [ ! -f "$LOG" ]; then
+            echo "FAIL: log file '$LOG' was not created"
+            exit 1
+          fi
+          echo "Log file contents:"
+          cat "$LOG"
+          # Count lines that contain "Status:" (one per site check)
+          COUNT=$(grep -c "Status:" "$LOG" || true)
+          echo "Lines with Status: $COUNT"
+          if [ "$COUNT" -lt 3 ]; then
+            echo "FAIL: expected at least 3 log entries with 'Status:', found $COUNT"
+            exit 1
+          fi
+          echo "PASS"

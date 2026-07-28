@@ -1,0 +1,31 @@
+name: Pre-Built Uptime Monitor Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to commit & push the log-file
+  issues: write     # needed to open an issue when a site is down
+
+jobs:
+  run-pre-built:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Run pre-built action
+        uses: "./"            # action.yml → dist/index.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          sites: |
+            https://httpbin.org/status/200
+            https://httpbin.org/status/404
+            https://httpbin.org/status/500
+            https://httpbin.org/delay/5
+            https://httpbin.org/delay/10
+          timezone: "Europe/Paris"
+          log-file: "uptime-pre-built.log"
+          commit-message: "🚀 Pre-built action test run"
