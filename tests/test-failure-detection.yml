@@ -1,4 +1,4 @@
-name: Test custom options
+name: Test failure detection
 on:
   workflow_dispatch:
 
@@ -22,66 +22,47 @@ jobs:
         uses: .
         with:
           sites: |
-            https://github.com
-            https://github.com/about
-          timezone: "America/New_York"
-          log-file: tests/uptime-test-custom.log
-          commit-message: "test: uptime check"
+            https://httpbin.org/status/404
+          log-file: tests/uptime-test-failure.log
+          create-issue: "false"
           timeout: "30"
           success-codes: "200,201,202,204"
-          max-concurrent: "2"
-          create-issue: "false"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assert total-sites is 2
+      - name: Assert total-sites is 1
         env:
           ACTUAL: ${{ steps.action.outputs.total-sites }}
         run: |
           echo "total-sites: $ACTUAL"
-          if [ "$ACTUAL" != "2" ]; then
-            echo "FAIL: expected total-sites=2, got '$ACTUAL'"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected total-sites=1, got '$ACTUAL'"
             exit 1
           fi
           echo "PASS"
 
-      - name: Assert failed-sites is 0
+      - name: Assert failed-sites is 1
         env:
           ACTUAL: ${{ steps.action.outputs.failed-sites }}
         run: |
           echo "failed-sites: $ACTUAL"
-          if [ "$ACTUAL" != "0" ]; then
-            echo "FAIL: expected failed-sites=0, got '$ACTUAL'"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected failed-sites=1, got '$ACTUAL'"
             exit 1
           fi
           echo "PASS"
 
-      - name: Assert log-file-path output
-        env:
-          ACTUAL: ${{ steps.action.outputs.log-file-path }}
+      - name: Assert log file records the failure
         run: |
-          echo "log-file-path: $ACTUAL"
-          if [ "$ACTUAL" != "tests/uptime-test-custom.log" ]; then
-            echo "FAIL: expected log-file-path='tests/uptime-test-custom.log', got '$ACTUAL'"
-            exit 1
-          fi
-          echo "PASS"
-
-      - name: Assert log file contains both URLs
-        run: |
-          LOG="$GITHUB_WORKSPACE/tests/uptime-test-custom.log"
+          LOG="$GITHUB_WORKSPACE/tests/uptime-test-failure.log"
           if [ ! -f "$LOG" ]; then
             echo "FAIL: log file not found at $LOG"
             exit 1
           fi
           echo "Log file contents:"
           cat "$LOG"
-          if ! grep -q "github.com" "$LOG"; then
-            echo "FAIL: log file does not contain first URL"
-            exit 1
-          fi
-          if ! grep -q "github.com/about" "$LOG"; then
-            echo "FAIL: log file does not contain second URL"
+          if ! grep -q "httpbin.org/status/404" "$LOG"; then
+            echo "FAIL: log file does not contain the monitored URL"
             exit 1
           fi
           echo "PASS"

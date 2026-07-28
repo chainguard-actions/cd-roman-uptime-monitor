@@ -1,53 +1,78 @@
 name: Test basic uptime monitoring
 on:
   workflow_dispatch:
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Set up local git remote for push
+
+      - name: Set up git remote reachable for push
         run: |
-          git init --bare /tmp/bare-repo.git
-          git remote set-url origin /tmp/bare-repo.git || git remote add origin /tmp/bare-repo.git
-          git config user.email "test@test.com"
-          git config user.name "Test"
-          git push --set-upstream origin HEAD
-      - id: monitor
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+          git push --set-upstream origin HEAD:act-harness
+
+      - id: action
         uses: .
         with:
           sites: |
-            https://example.com
+            https://github.com
+          log-file: tests/uptime-test-basic.log
           create-issue: "false"
+          timeout: "30"
         env:
-          GITHUB_TOKEN: fake-token-not-needed
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Assert total-sites output
         env:
-          TOTAL: ${{ steps.monitor.outputs.total-sites }}
+          ACTUAL: ${{ steps.action.outputs.total-sites }}
         run: |
-          echo "total-sites: $TOTAL"
-          if [ "$TOTAL" != "1" ]; then
-            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+          echo "total-sites: $ACTUAL"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected total-sites=1, got '$ACTUAL'"
             exit 1
           fi
           echo "PASS"
-      - name: Assert log-file-path output is set
+
+      - name: Assert failed-sites output
         env:
-          LOG_PATH: ${{ steps.monitor.outputs.log-file-path }}
+          ACTUAL: ${{ steps.action.outputs.failed-sites }}
         run: |
-          echo "log-file-path: $LOG_PATH"
-          if [ -z "$LOG_PATH" ]; then
-            echo "FAIL: expected log-file-path to be non-empty"
+          echo "failed-sites: $ACTUAL"
+          if [ "$ACTUAL" != "0" ]; then
+            echo "FAIL: expected failed-sites=0, got '$ACTUAL'"
             exit 1
           fi
           echo "PASS"
-      - name: Assert failed-sites output is set
+
+      - name: Assert log-file-path output
         env:
-          FAILED: ${{ steps.monitor.outputs.failed-sites }}
+          ACTUAL: ${{ steps.action.outputs.log-file-path }}
         run: |
-          echo "failed-sites: $FAILED"
-          if [ -z "$FAILED" ]; then
-            echo "FAIL: expected failed-sites output to be set"
+          echo "log-file-path: $ACTUAL"
+          if [ "$ACTUAL" != "tests/uptime-test-basic.log" ]; then
+            echo "FAIL: expected log-file-path='tests/uptime-test-basic.log', got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert log file exists and has content
+        run: |
+          LOG="$GITHUB_WORKSPACE/tests/uptime-test-basic.log"
+          if [ ! -f "$LOG" ]; then
+            echo "FAIL: log file not found at $LOG"
+            exit 1
+          fi
+          echo "Log file contents:"
+          cat "$LOG"
+          if ! grep -q "github.com" "$LOG"; then
+            echo "FAIL: log file does not contain expected URL"
             exit 1
           fi
           echo "PASS"
