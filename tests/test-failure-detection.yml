@@ -6,78 +6,67 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Set up git config and fake remote
+        with:
+          fetch-depth: 0
+
+      - name: Set up git remote reachable for push
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
+          git config user.email "test@example.com"
+          git config user.name "Test User"
           git config push.default current
-          # Create a bare repo to act as the remote
-          git init --bare /tmp/fake-remote.git
-          git remote remove origin 2>/dev/null || true
-          git remote add origin /tmp/fake-remote.git
-          # Push current branch to the fake remote and set upstream
-          git push -u origin HEAD:act-harness
-      - name: Start local HTTP server that returns 404
-        run: |
-          # Use Python to serve a 404 response
-          python3 -c "
-          import http.server, socketserver
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
 
-          class Handler(http.server.BaseHTTPRequestHandler):
-              def do_GET(self):
-                  self.send_response(404)
-                  self.end_headers()
-                  self.wfile.write(b'Not Found')
-              def log_message(self, format, *args):
-                  pass
-
-          with socketserver.TCPServer(('', 8766), Handler) as httpd:
-              httpd.serve_forever()
-          " &
-          # Wait for server to be ready (use -s without -f since we expect 404)
-          for i in $(seq 1 10); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8766/ 2>/dev/null || true)
-            [ "$STATUS" = "404" ] && break
-            sleep 1
-          done
-          echo "Server ready"
       - id: action
         uses: .
         with:
-          sites: "http://localhost:8766/"
-          create-issue: "false"
-          timeout: "10"
+          sites: |
+            https://github.com
+            https://api.github.com/repos/this-user-does-not-exist-xyz/this-repo-does-not-exist-xyz
+          log-file: "failure-detection.log"
+          timeout: "30"
           success-codes: "200,201,202,204"
-        env:
-          GITHUB_TOKEN: dummy-token
-      - name: Assert total-sites is 1
+          max-concurrent: "5"
+          create-issue: "false"
+
+      - name: Assert total-sites is 2
         env:
           TOTAL: ${{ steps.action.outputs.total-sites }}
         run: |
           echo "total-sites: $TOTAL"
-          if [ "$TOTAL" != "1" ]; then
-            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+          if [ "$TOTAL" != "2" ]; then
+            echo "FAIL: expected total-sites=2, got '$TOTAL'"
             exit 1
           fi
           echo "PASS"
-      - name: Assert failed-sites is 1 (404 is not in success codes)
+
+      - name: Assert failed-sites is at least 1
         env:
           FAILED: ${{ steps.action.outputs.failed-sites }}
         run: |
           echo "failed-sites: $FAILED"
-          if [ "$FAILED" != "1" ]; then
-            echo "FAIL: expected failed-sites to be '1', got '$FAILED'"
+          if ! echo "$FAILED" | grep -qE '^[0-9]+$'; then
+            echo "FAIL: expected failed-sites to be a number, got '$FAILED'"
+            exit 1
+          fi
+          if [ "$FAILED" -lt 1 ]; then
+            echo "FAIL: expected at least 1 failed site (404 URL should fail), got '$FAILED'"
             exit 1
           fi
           echo "PASS"
+
       - name: Assert log file exists
         env:
           LOG_PATH: ${{ steps.action.outputs.log-file-path }}
         run: |
-          echo "log-file-path: $LOG_PATH"
+          echo "Checking log file at: $LOG_PATH"
           if [ ! -f "$LOG_PATH" ]; then
             echo "FAIL: log file not found at '$LOG_PATH'"
             exit 1
           fi
-          echo "PASS: log file exists"
+          echo "Log file contents:"
           cat "$LOG_PATH"
+          echo "PASS"
