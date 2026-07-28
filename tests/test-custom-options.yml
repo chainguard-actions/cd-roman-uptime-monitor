@@ -1,4 +1,4 @@
-name: Test basic usage - single site monitoring
+name: Test custom options - timezone, success-codes, commit-message
 on:
   workflow_dispatch:
 
@@ -10,11 +10,11 @@ jobs:
 
       - name: Start local HTTP server
         run: |
-          python3 -m http.server 8080 --directory /tmp &
+          python3 -m http.server 8081 --directory /tmp &
           echo $! > /tmp/http-server.pid
           # Wait for server to be ready
           for i in $(seq 1 10); do
-            if curl -sf http://localhost:8080/ > /dev/null 2>&1; then
+            if curl -sf http://localhost:8081/ > /dev/null 2>&1; then
               echo "HTTP server ready"
               break
             fi
@@ -34,10 +34,14 @@ jobs:
       - id: action
         uses: .
         with:
-          sites: "http://localhost:8080/"
-          log-file: "tests/uptime-basic.log"
+          sites: "http://localhost:8081/"
+          timezone: "America/New_York"
+          log-file: "tests/uptime-custom.log"
+          commit-message: "chore: uptime check results"
+          timeout: "20"
+          success-codes: "200,201,202,204,301,302"
+          max-concurrent: "2"
           create-issue: "false"
-          timeout: "30"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -57,36 +61,36 @@ jobs:
           ACTUAL: ${{ steps.action.outputs.log-file-path }}
         run: |
           echo "actual log-file-path: $ACTUAL"
-          if [ "$ACTUAL" != "tests/uptime-basic.log" ]; then
-            echo "FAIL: expected log-file-path='tests/uptime-basic.log', got '$ACTUAL'"
+          if [ "$ACTUAL" != "tests/uptime-custom.log" ]; then
+            echo "FAIL: expected log-file-path='tests/uptime-custom.log', got '$ACTUAL'"
             exit 1
           fi
           echo "PASS: log-file-path correct"
 
-      - name: Assert log file exists and contains URL
+      - name: Assert log file exists and has content
         run: |
-          if [ ! -f "tests/uptime-basic.log" ]; then
+          if [ ! -f "tests/uptime-custom.log" ]; then
             echo "FAIL: log file not found"
             exit 1
           fi
           echo "Log file contents:"
-          cat tests/uptime-basic.log
-          if ! grep -q "localhost:8080" tests/uptime-basic.log; then
+          cat tests/uptime-custom.log
+          if ! grep -q "localhost:8081" tests/uptime-custom.log; then
             echo "FAIL: log file does not contain the monitored URL"
             exit 1
           fi
           echo "PASS: log file exists and contains URL"
 
-      - name: Assert failed-sites output (should be 0 for a healthy site)
+      - name: Assert failed-sites output is set (numeric)
         env:
           ACTUAL: ${{ steps.action.outputs.failed-sites }}
         run: |
           echo "actual failed-sites: $ACTUAL"
-          if [ "$ACTUAL" != "0" ]; then
-            echo "WARN: expected failed-sites=0, got '$ACTUAL' (site may be temporarily down)"
-          else
-            echo "PASS: failed-sites=0"
+          if ! echo "$ACTUAL" | grep -qE '^[0-9]+$'; then
+            echo "FAIL: failed-sites is not a number: '$ACTUAL'"
+            exit 1
           fi
+          echo "PASS: failed-sites is a valid number: $ACTUAL"
 
       - name: Stop local HTTP server
         if: always()

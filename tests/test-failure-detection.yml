@@ -1,62 +1,95 @@
-name: Test failure detection
+name: Test failure detection - non-success status codes
 on:
   workflow_dispatch:
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up local git remote so push succeeds
+      - name: Start local HTTP server
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git init --bare /tmp/remote-repo.git
-          git remote remove origin 2>/dev/null || true
-          git remote add origin /tmp/remote-repo.git
+          python3 -m http.server 8082 --directory /tmp &
+          echo $! > /tmp/http-server.pid
+          # Wait for server to be ready
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8082/ > /dev/null 2>&1; then
+              echo "HTTP server ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Set up git identity and local remote for git push
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
           git push --set-upstream origin HEAD:act-harness
 
       - id: action
         uses: .
         with:
-          sites: "https://httpbin.org/status/503"
+          # Request a non-existent path to get a 404 response
+          sites: "http://localhost:8082/this-path-does-not-exist-xyz"
+          log-file: "tests/uptime-failure.log"
           create-issue: "false"
-          log-file: "failure-detection-uptime.log"
-          timeout: "10"
+          timeout: "30"
           success-codes: "200,201,202,204"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Assert total-sites is 1
         env:
-          TOTAL: ${{ steps.action.outputs.total-sites }}
+          ACTUAL: ${{ steps.action.outputs.total-sites }}
         run: |
-          echo "total-sites: $TOTAL"
-          if [ "$TOTAL" != "1" ]; then
-            echo "FAIL: expected total-sites to be '1', got '$TOTAL'"
+          echo "actual total-sites: $ACTUAL"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected total-sites=1, got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS"
+          echo "PASS: total-sites=1"
 
-      - name: Assert failed-sites is 1 (503 should be a failure)
+      - name: Assert failed-sites is 1 (404 is not a success code)
         env:
-          FAILED: ${{ steps.action.outputs.failed-sites }}
+          ACTUAL: ${{ steps.action.outputs.failed-sites }}
         run: |
-          echo "failed-sites: $FAILED"
-          if [ "$FAILED" != "1" ]; then
-            echo "FAIL: expected failed-sites to be '1', got '$FAILED'"
+          echo "actual failed-sites: $ACTUAL"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected failed-sites=1 for a 404 response, got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS: correctly detected 1 failed site"
+          echo "PASS: failed-sites=1 (404 correctly detected as failure)"
 
-      - name: Assert log file was created
-        env:
-          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+      - name: Assert log file contains the failed URL
         run: |
-          echo "Checking for log file at: $LOG_PATH"
-          if [ ! -f "$LOG_PATH" ]; then
-            echo "FAIL: log file not found at $LOG_PATH"
+          if [ ! -f "tests/uptime-failure.log" ]; then
+            echo "FAIL: log file not found"
             exit 1
           fi
-          echo "PASS: log file exists"
-          cat "$LOG_PATH"
+          echo "Log file contents:"
+          cat tests/uptime-failure.log
+          if ! grep -q "localhost:8082" tests/uptime-failure.log; then
+            echo "FAIL: log file does not contain the failed URL"
+            exit 1
+          fi
+          echo "PASS: log file contains the failed URL"
+
+      - name: Assert log file records status 404
+        run: |
+          if ! grep -q "Status: 404" tests/uptime-failure.log; then
+            echo "FAIL: log file does not record status 404"
+            exit 1
+          fi
+          echo "PASS: log file records status 404"
+
+      - name: Stop local HTTP server
+        if: always()
+        run: |
+          if [ -f /tmp/http-server.pid ]; then
+            kill $(cat /tmp/http-server.pid) 2>/dev/null || true
+          fi

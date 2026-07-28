@@ -1,63 +1,114 @@
 name: Test multiple sites monitoring
 on:
   workflow_dispatch:
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up local git remote so push succeeds
+      - name: Start local HTTP servers
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git init --bare /tmp/remote-repo.git
-          git remote remove origin 2>/dev/null || true
-          git remote add origin /tmp/remote-repo.git
+          # Create a test file for the servers to serve
+          echo "test content" > /tmp/test-page.html
+          # Start two servers on different ports
+          python3 -m http.server 8083 --directory /tmp &
+          echo $! > /tmp/http-server-8083.pid
+          python3 -m http.server 8084 --directory /tmp &
+          echo $! > /tmp/http-server-8084.pid
+          # Wait for servers to be ready
+          for port in 8083 8084; do
+            for i in $(seq 1 10); do
+              if curl -sf "http://localhost:$port/" > /dev/null 2>&1; then
+                echo "HTTP server on port $port ready"
+                break
+              fi
+              sleep 1
+            done
+          done
+
+      - name: Set up git identity and local remote for git push
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
           git push --set-upstream origin HEAD:act-harness
 
       - id: action
         uses: .
         with:
           sites: |
-            https://example.com
-            https://httpbin.org/status/200
+            http://localhost:8083/
+            http://localhost:8084/
+            http://localhost:8083/test-page.html
+          log-file: "tests/uptime-multi.log"
           create-issue: "false"
-          log-file: "test-multi-uptime.log"
-          max-concurrent: "2"
+          timeout: "30"
+          max-concurrent: "3"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assert total-sites is 2
+      - name: Assert total-sites output is 3
         env:
-          TOTAL: ${{ steps.action.outputs.total-sites }}
+          ACTUAL: ${{ steps.action.outputs.total-sites }}
         run: |
-          echo "total-sites: $TOTAL"
-          if [ "$TOTAL" != "2" ]; then
-            echo "FAIL: expected total-sites to be '2', got '$TOTAL'"
+          echo "actual total-sites: $ACTUAL"
+          if [ "$ACTUAL" != "3" ]; then
+            echo "FAIL: expected total-sites=3, got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS"
+          echo "PASS: total-sites=3"
 
-      - name: Assert failed-sites output is set
+      - name: Assert log-file-path output
         env:
-          FAILED: ${{ steps.action.outputs.failed-sites }}
+          ACTUAL: ${{ steps.action.outputs.log-file-path }}
         run: |
-          echo "failed-sites: $FAILED"
-          if [ -z "$FAILED" ]; then
-            echo "FAIL: expected failed-sites output to be set"
+          echo "actual log-file-path: $ACTUAL"
+          if [ "$ACTUAL" != "tests/uptime-multi.log" ]; then
+            echo "FAIL: expected log-file-path='tests/uptime-multi.log', got '$ACTUAL'"
             exit 1
           fi
-          echo "PASS: failed-sites=$FAILED"
+          echo "PASS: log-file-path correct"
 
-      - name: Assert log file was created
-        env:
-          LOG_PATH: ${{ steps.action.outputs.log-file-path }}
+      - name: Assert log file contains all monitored URLs
         run: |
-          echo "Checking for log file at: $LOG_PATH"
-          if [ ! -f "$LOG_PATH" ]; then
-            echo "FAIL: log file not found at $LOG_PATH"
+          if [ ! -f "tests/uptime-multi.log" ]; then
+            echo "FAIL: log file not found"
             exit 1
           fi
-          echo "PASS: log file exists"
-          cat "$LOG_PATH"
+          echo "Log file contents:"
+          cat tests/uptime-multi.log
+          # Check that both server ports appear in the log
+          if ! grep -q "localhost:8083" tests/uptime-multi.log; then
+            echo "FAIL: log file missing URLs from server on port 8083"
+            exit 1
+          fi
+          if ! grep -q "localhost:8084" tests/uptime-multi.log; then
+            echo "FAIL: log file missing URL from server on port 8084"
+            exit 1
+          fi
+          echo "PASS: log file contains all monitored URLs"
+
+      - name: Assert failed-sites output is set (numeric)
+        env:
+          ACTUAL: ${{ steps.action.outputs.failed-sites }}
+        run: |
+          echo "actual failed-sites: $ACTUAL"
+          if ! echo "$ACTUAL" | grep -qE '^[0-9]+$'; then
+            echo "FAIL: failed-sites is not a number: '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS: failed-sites is a valid number: $ACTUAL"
+
+      - name: Stop local HTTP servers
+        if: always()
+        run: |
+          for pidfile in /tmp/http-server-8083.pid /tmp/http-server-8084.pid; do
+            if [ -f "$pidfile" ]; then
+              kill $(cat "$pidfile") 2>/dev/null || true
+            fi
+          done
